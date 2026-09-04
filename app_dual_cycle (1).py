@@ -725,32 +725,67 @@ def build_excel_download(
 # (bukan relatif terhadap current working directory), supaya tetap
 # ketemu walau di-deploy di Streamlit Cloud yang CWD-nya bisa beda
 # dari folder script. File logo harus ada di:
-#   <folder app.py>/assets/logo_caca.png
+#   <folder app.py>/assets/logo_caca_icon.png  (ikon CACA saja, tanpa teks)
 #   <folder app.py>/assets/logo_pelindo.png
 # ----------------------------------------------------------------
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-LOGO_CACA_PATH = ASSETS_DIR / "logo_caca.png"
+LOGO_CACA_ICON_PATH = ASSETS_DIR / "logo_caca_icon.png"
 LOGO_PATH = ASSETS_DIR / "logo_pelindo.png"
 
 
-def _tampilkan_logo(path: Path, lebar: int = None):
-    if path.exists():
-        if lebar:
-            st.image(str(path), width=lebar)
-        else:
-            st.image(str(path), width='stretch')
-    else:
-        st.caption(
-            f"⚠️ Logo tidak ditemukan di `{path}`. Pastikan file ikut "
-            "di-upload/commit satu paket dengan app.py."
-        )
+def _img_to_base64(path: Path) -> str:
+    import base64
+    return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
-col_logo_kiri, col_tengah, col_logo_kanan = st.columns([1, 4, 1])
-with col_logo_kiri:
-    _tampilkan_logo(LOGO_CACA_PATH, lebar=110)
-with col_logo_kanan:
-    _tampilkan_logo(LOGO_PATH, lebar=220)
+def _render_header(icon_path: Path, brand_path: Path):
+    """
+    Header custom pakai flexbox HTML (bukan st.columns) supaya ikon,
+    judul "CACA", subjudul, dan logo Pelindo di kanan bisa presisi
+    sejajar vertikal (align-items: center) mirip layout referensi.
+    """
+    icon_ok = icon_path.exists()
+    brand_ok = brand_path.exists()
+
+    icon_html = (
+        f'<img src="data:image/png;base64,{_img_to_base64(icon_path)}" '
+        f'style="height:44px;width:auto;display:block;" />'
+        if icon_ok else ""
+    )
+    brand_html = (
+        f'<img src="data:image/png;base64,{_img_to_base64(brand_path)}" '
+        f'style="height:40px;width:auto;display:block;" />'
+        if brand_ok else ""
+    )
+
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:6px 0 2px 0;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                {icon_html}
+                <div style="line-height:1.15;">
+                    <div style="font-size:1.55rem;font-weight:800;color:#16324f;
+                                letter-spacing:0.5px;">CACA</div>
+                    <div style="font-size:0.72rem;color:#6b7280;">
+                        Cycle Analysis and Cargo Optimalization
+                    </div>
+                </div>
+            </div>
+            <div>{brand_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not icon_ok:
+        st.caption(f"⚠️ Logo CACA tidak ditemukan di `{icon_path}`.")
+    if not brand_ok:
+        st.caption(f"⚠️ Logo Pelindo tidak ditemukan di `{brand_path}`.")
+
+
+_render_header(LOGO_CACA_ICON_PATH, LOGO_PATH)
+st.divider()
 
 # ----------------------------------------------------------------
 # PENGATURAN -- ditaruh langsung di dashboard (bukan sidebar) biar
