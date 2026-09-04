@@ -746,17 +746,11 @@ def _tampilkan_logo(path: Path, lebar: int = None):
         )
 
 
-col_logo_kiri, col_tengah, col_logo_kanan = st.columns([1, 3, 1])
+col_logo_kiri, col_tengah, col_logo_kanan = st.columns([1, 4, 1])
 with col_logo_kiri:
-    _tampilkan_logo(LOGO_CACA_PATH)
+    _tampilkan_logo(LOGO_CACA_PATH, lebar=110)
 with col_logo_kanan:
-    _tampilkan_logo(LOGO_PATH)
-
-st.caption(
-    "Port dari macro VBA Analisis Dual Cycle, plus tambahan analisis Twinlift. "
-    "Upload data mentah, atur ambang batas, lihat hasilnya dalam chart interaktif, "
-    "lalu download hasil analisis lengkap."
-)
+    _tampilkan_logo(LOGO_PATH, lebar=220)
 
 # ----------------------------------------------------------------
 # PENGATURAN -- ditaruh langsung di dashboard (bukan sidebar) biar
