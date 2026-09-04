@@ -766,7 +766,7 @@ def _render_header(icon_path: Path, brand_path: Path):
     )
     brand_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(brand_path)}" '
-        f'style="height:40px;width:auto;display:block;" />'
+        f'style="height:64px;width:auto;display:block;" />'
         if brand_ok else ""
     )
 
@@ -904,6 +904,21 @@ col_map = {
 
 run = st.button("▶️ Jalankan Analisis Dual Cycle", type="primary")
 
+# ----------------------------------------------------------------
+# Kalau ada hasil analisis lama tersimpan di session (dari sebelum
+# kode di-update, mis. sebelum field ringkasan baru ditambahkan),
+# buang saja cache lama itu supaya tidak KeyError -- minta user
+# klik jalankan lagi. Cukup cek 1 key penanda skema paling baru.
+# ----------------------------------------------------------------
+if not run and "hasil" in st.session_state:
+    _cached_summary = st.session_state["hasil"].get("summary", {})
+    if "total_non_twinlift" not in _cached_summary:
+        st.session_state.pop("hasil", None)
+        st.warning(
+            "⚠️ Hasil analisis sebelumnya sudah usang (aplikasi baru saja diperbarui). "
+            "Silakan klik tombol di atas untuk menjalankan ulang analisis."
+        )
+
 if not run and "hasil" not in st.session_state:
     st.info("👆 Klik tombol di atas untuk menjalankan analisis pada file ini.")
     st.stop()
@@ -958,13 +973,14 @@ st.success("Analisis selesai!")
 monthly = summary["monthly"].reset_index().rename(columns={"BULAN": "Bulan"})
 
 # ================================================================
-# DASHBOARD HASIL -- ditampilkan sbg 3 menu/tab: Dual Cycle,
-# Twinlift, dan Download Hasil Analisis, langsung berisi grafik
-# tanpa perlu scroll panjang lewat banyak subheader.
+# DASHBOARD HASIL -- ditampilkan sbg 4 menu/tab: Dual Cycle,
+# Twinlift, Analisis per Vessel, dan Download Hasil Analisis,
+# langsung berisi grafik tanpa perlu scroll panjang lewat banyak
+# subheader.
 # ================================================================
 
-tab_dual, tab_twinlift, tab_download = st.tabs(
-    ["📊 Dual Cycle", "🔗 Twinlift", "⬇️ Download Hasil Analisis"]
+tab_dual, tab_twinlift, tab_vessel, tab_download = st.tabs(
+    ["📊 Dual Cycle", "🔗 Twinlift", "🚢 Per Vessel", "⬇️ Download Hasil Analisis"]
 )
 
 # ----------------------------------------------------------------
@@ -1056,30 +1072,6 @@ with tab_dual:
         fig_month_container.update_layout(yaxis=dict(title="% dari Total Event", range=[0, 100]))
         st.plotly_chart(fig_month_container, width='stretch')
 
-        with st.expander("📋 Tabel Breakdown Bulanan (dalam persen)"):
-            tabel_bulan = monthly[
-                ["Bulan", "total_event", "pct_dual", "pct_non_dual", "pct_combo", "pct_single"]
-            ].copy()
-            tabel_bulan.columns = [
-                "Bulan", "Total Event", "% Dual Cycle", "% Non Dual", "% Combo", "% Single",
-            ]
-            for c in ["% Dual Cycle", "% Non Dual", "% Combo", "% Single"]:
-                tabel_bulan[c] = (tabel_bulan[c] * 100).round(1).astype(str) + "%"
-            st.dataframe(tabel_bulan, width='stretch', hide_index=True)
-
-    with st.expander("📋 Rincian Aktivitas (berbasis baris LOAD/DISC — info tambahan)"):
-        act_df = pd.DataFrame(
-            {
-                "Status": ["Dual Cycle", "Dual Cycle", "Non Dual", "Non Dual"],
-                "Activity": ["LOAD", "DISC", "LOAD", "DISC"],
-                "Jumlah": [
-                    summary["dual_load"], summary["dual_disc"],
-                    summary["single_load"], summary["single_disc"],
-                ],
-            }
-        )
-        st.dataframe(act_df, width='stretch', hide_index=True)
-
 # ----------------------------------------------------------------
 # TAB 2: TWINLIFT
 # ----------------------------------------------------------------
@@ -1153,7 +1145,84 @@ with tab_twinlift:
             st.dataframe(tabel_twin, width='stretch', hide_index=True)
 
 # ----------------------------------------------------------------
-# TAB 3: DOWNLOAD HASIL ANALISIS
+# TAB 3: ANALISIS PER VESSEL
+# ----------------------------------------------------------------
+with tab_vessel:
+    st.caption(
+        "Cari satu kapal (VES_ID) untuk melihat karakteristiknya: Dual Cycle & Twinlift-nya "
+        "dihitung dari seluruh aktivitas (baris LOAD/DISC) milik kapal tersebut."
+    )
+
+    vessel_options = sorted(out_df["VES_ID"].astype(str).unique().tolist())
+
+    if len(vessel_options) == 0:
+        st.info("Tidak ada data VES_ID pada hasil analisis ini.")
+    else:
+        selected_vessel = st.selectbox("🔍 Cari / pilih VES_ID", vessel_options)
+
+        vessel_df = out_df[out_df["VES_ID"].astype(str) == selected_vessel]
+
+        total_rec = len(vessel_df)
+        dual_rec = int((vessel_df["STATUS"] == "Dual Cycle").sum())
+        non_dual_rec = total_rec - dual_rec
+        twinlift_rec = int((vessel_df["TWINLIFT_STATUS"] == "Twinlift").sum())
+        non_twinlift_rec = total_rec - twinlift_rec
+        combo_rec = int((vessel_df["CONTAINER_STATUS"] == "Combo").sum())
+        single_rec = total_rec - combo_rec
+
+        v1, v2, v3, v4, v5 = st.columns(5)
+        v1.metric("Total Aktivitas (baris)", total_rec)
+        v2.metric("Dual Cycle", dual_rec)
+        v3.metric("% Dual Cycle", f"{(dual_rec/total_rec*100) if total_rec else 0:.1f}%")
+        v4.metric("Twinlift", twinlift_rec)
+        v5.metric("% Twinlift", f"{(twinlift_rec/total_rec*100) if total_rec else 0:.1f}%")
+
+        vc1, vc2 = st.columns(2)
+        with vc1:
+            if total_rec > 0:
+                pie_dual_v = pd.DataFrame(
+                    {"Status": ["Dual Cycle", "Non Dual"], "Jumlah": [dual_rec, non_dual_rec]}
+                )
+                fig_v1 = px.pie(
+                    pie_dual_v, names="Status", values="Jumlah", hole=0.45,
+                    title=f"Dual Cycle vs Non Dual — {selected_vessel}",
+                    color="Status",
+                    color_discrete_map={"Dual Cycle": "#2E86AB", "Non Dual": "#E76F51"},
+                )
+                fig_v1.update_traces(textinfo="percent+label")
+                st.plotly_chart(fig_v1, width='stretch')
+
+        with vc2:
+            if total_rec > 0:
+                pie_twin_v = pd.DataFrame(
+                    {"Status": ["Twinlift", "Bukan Twinlift"], "Jumlah": [twinlift_rec, non_twinlift_rec]}
+                )
+                fig_v2 = px.pie(
+                    pie_twin_v, names="Status", values="Jumlah", hole=0.45,
+                    title=f"Twinlift vs Bukan Twinlift — {selected_vessel}",
+                    color="Status",
+                    color_discrete_map={"Twinlift": "#6A4C93", "Bukan Twinlift": "#C0C0C0"},
+                )
+                fig_v2.update_traces(textinfo="percent+label")
+                st.plotly_chart(fig_v2, width='stretch')
+
+        vcont_df = pd.DataFrame(
+            {"Container": ["Combo", "Single"], "Jumlah": [combo_rec, single_rec]}
+        )
+        fig_v3 = px.bar(
+            vcont_df, x="Container", y="Jumlah",
+            title=f"Combo vs Single — {selected_vessel}",
+            color="Container",
+            color_discrete_map={"Combo": "#F4A261", "Single": "#8AB17D"},
+            text="Jumlah",
+        )
+        st.plotly_chart(fig_v3, width='stretch')
+
+        with st.expander(f"📋 Data Aktivitas — {selected_vessel} ({total_rec} baris)"):
+            st.dataframe(vessel_df, width='stretch', height=350)
+
+# ----------------------------------------------------------------
+# TAB 4: DOWNLOAD HASIL ANALISIS
 # ----------------------------------------------------------------
 with tab_download:
     st.write(f"Data hasil analisis ({len(out_df)} baris):")
