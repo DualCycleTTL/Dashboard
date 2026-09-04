@@ -376,7 +376,12 @@ def hitung_ringkasan(events: pd.DataFrame, out_df: pd.DataFrame) -> dict:
     total_combo = int((events["CONTAINER_STATUS"] == "Combo").sum())
     total_twinlift = int((events["TWINLIFT_STATUS"] == "Twinlift").sum())
     total_combo_bukan_twinlift = total_combo - total_twinlift
+    # Basis breakdown Twinlift = TOTAL EVENT (bukan Total Combo). "Bukan Twinlift"
+    # di sini artinya semua event selain Twinlift, termasuk Single & Combo yang
+    # bukan Twinlift.
+    total_non_twinlift = total_event - total_twinlift
     pct_twinlift_of_total = (total_twinlift / total_event) if total_event else 0
+    pct_non_twinlift_of_total = (total_non_twinlift / total_event) if total_event else 0
     pct_twinlift_of_combo = (total_twinlift / total_combo) if total_combo else 0
 
     dual_load = int(((out_df["STATUS"] == "Dual Cycle") & (out_df["ACTIVITY"] == "LOAD")).sum())
@@ -412,12 +417,17 @@ def hitung_ringkasan(events: pd.DataFrame, out_df: pd.DataFrame) -> dict:
     monthly["non_dual"] = monthly["total_event"] - monthly["dual"]
     monthly["single"] = monthly["total_event"] - monthly["combo"]
     monthly["combo_bukan_twinlift"] = monthly["combo"] - monthly["twinlift"]
+    # Basis breakdown Twinlift = TOTAL EVENT bulan tsb (bukan Total Combo bulan tsb)
+    monthly["non_twinlift"] = monthly["total_event"] - monthly["twinlift"]
 
     monthly["pct_dual"] = np.where(monthly["total_event"] > 0, monthly["dual"] / monthly["total_event"], 0)
     monthly["pct_non_dual"] = np.where(monthly["total_event"] > 0, monthly["non_dual"] / monthly["total_event"], 0)
     monthly["pct_combo"] = np.where(monthly["total_event"] > 0, monthly["combo"] / monthly["total_event"], 0)
     monthly["pct_single"] = np.where(monthly["total_event"] > 0, monthly["single"] / monthly["total_event"], 0)
     monthly["pct_twinlift"] = np.where(monthly["total_event"] > 0, monthly["twinlift"] / monthly["total_event"], 0)
+    monthly["pct_non_twinlift"] = np.where(
+        monthly["total_event"] > 0, monthly["non_twinlift"] / monthly["total_event"], 0
+    )
     monthly["pct_twinlift_of_combo"] = np.where(
         monthly["combo"] > 0, monthly["twinlift"] / monthly["combo"], 0
     )
@@ -440,7 +450,9 @@ def hitung_ringkasan(events: pd.DataFrame, out_df: pd.DataFrame) -> dict:
         "total_combo": total_combo,
         "total_twinlift": total_twinlift,
         "total_combo_bukan_twinlift": total_combo_bukan_twinlift,
+        "total_non_twinlift": total_non_twinlift,
         "pct_twinlift_of_total": pct_twinlift_of_total,
+        "pct_non_twinlift_of_total": pct_non_twinlift_of_total,
         "pct_twinlift_of_combo": pct_twinlift_of_combo,
         "dual_load": dual_load,
         "dual_disc": dual_disc,
@@ -520,17 +532,17 @@ def build_excel_download(
     ws["A23"], ws["B23"] = "Jumlah Container - LOAD", summary["container_load"]
     ws["A24"], ws["B24"] = "Jumlah Container - DISC", summary["container_disc"]
 
-    # ---- RINGKASAN TWINLIFT ----
-    ws["A25"] = "RINGKASAN TWINLIFT (SUB-ANALISIS DI DALAM COMBO)"
+    # ---- RINGKASAN TWINLIFT (basis: TOTAL EVENT) ----
+    ws["A25"] = "RINGKASAN TWINLIFT (BERBASIS TOTAL EVENT)"
     ws["A25"].font = Font(bold=True)
-    ws["A26"], ws["B26"] = "Total Combo", summary["total_combo"]
+    ws["A26"], ws["B26"] = "Total Event (Ritase)", summary["total_event"]
     ws["A27"], ws["B27"] = "Twinlift", summary["total_twinlift"]
     ws["A27"].font = Font(bold=True)
     ws["B27"].font = Font(bold=True)
-    ws["A28"], ws["B28"] = "Combo - Bukan Twinlift", summary["total_combo_bukan_twinlift"]
+    ws["A28"], ws["B28"] = "Bukan Twinlift", summary["total_non_twinlift"]
     ws["A29"], ws["B29"] = "% Twinlift dari Total Event", summary["pct_twinlift_of_total"]
     ws["B29"].number_format = "0.0%"
-    ws["A30"], ws["B30"] = "% Twinlift dari Total Combo", summary["pct_twinlift_of_combo"]
+    ws["A30"], ws["B30"] = "% Bukan Twinlift dari Total Event", summary["pct_non_twinlift_of_total"]
     ws["B30"].number_format = "0.0%"
 
     ws["A32"] = "BREAKDOWN BULANAN: DUAL CYCLE VS NON DUAL (EVENT / RITASE)"
@@ -604,11 +616,11 @@ def build_excel_download(
     for c in range(1, 7):
         ws.cell(total_row2, c).font = Font(bold=True)
 
-    # ---- Breakdown bulanan tambahan: Twinlift vs Bukan Twinlift (dari Combo, %) ----
+    # ---- Breakdown bulanan tambahan: Twinlift vs Bukan Twinlift (dari Total Event, %) ----
     header_row3 = total_row2 + 3
-    ws.cell(header_row3 - 1, 1, "BREAKDOWN BULANAN: TWINLIFT VS BUKAN TWINLIFT (DARI COMBO, %)")
+    ws.cell(header_row3 - 1, 1, "BREAKDOWN BULANAN: TWINLIFT VS BUKAN TWINLIFT (DARI TOTAL EVENT, %)")
     ws.cell(header_row3 - 1, 1).font = Font(bold=True)
-    headers3 = ["Bulan", "Total Combo", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift"]
+    headers3 = ["Bulan", "Total Event", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift"]
     for c_idx, label in enumerate(headers3, start=1):
         cell = ws.cell(header_row3, c_idx, label)
         cell.font = Font(bold=True)
@@ -617,24 +629,24 @@ def build_excel_download(
     for bulan, row in monthly.iterrows():
         r3 += 1
         ws.cell(r3, 1, str(bulan))
-        ws.cell(r3, 2, int(row["combo"]))
+        ws.cell(r3, 2, int(row["total_event"]))
         ws.cell(r3, 3, int(row["twinlift"]))
-        ws.cell(r3, 4, int(row["combo_bukan_twinlift"]))
-        ws.cell(r3, 5, float(row["pct_twinlift_of_combo"]))
+        ws.cell(r3, 4, int(row["non_twinlift"]))
+        ws.cell(r3, 5, float(row["pct_twinlift"]))
         ws.cell(r3, 5).number_format = "0.0%"
-        ws.cell(r3, 6, float(row["pct_combo_bukan_twinlift_of_combo"]))
+        ws.cell(r3, 6, float(row["pct_non_twinlift"]))
         ws.cell(r3, 6).number_format = "0.0%"
 
     total_row3 = r3 + 1
     tot_twinlift = int(monthly["twinlift"].sum()) if len(monthly) else 0
-    tot_combo_bukan_twinlift = int(monthly["combo_bukan_twinlift"].sum()) if len(monthly) else 0
+    tot_non_twinlift = int(monthly["non_twinlift"].sum()) if len(monthly) else 0
     ws.cell(total_row3, 1, "Total")
-    ws.cell(total_row3, 2, tot_combo)
+    ws.cell(total_row3, 2, tot_evt)
     ws.cell(total_row3, 3, tot_twinlift)
-    ws.cell(total_row3, 4, tot_combo_bukan_twinlift)
-    ws.cell(total_row3, 5, (tot_twinlift / tot_combo) if tot_combo else 0)
+    ws.cell(total_row3, 4, tot_non_twinlift)
+    ws.cell(total_row3, 5, (tot_twinlift / tot_evt) if tot_evt else 0)
     ws.cell(total_row3, 5).number_format = "0.0%"
-    ws.cell(total_row3, 6, (tot_combo_bukan_twinlift / tot_combo) if tot_combo else 0)
+    ws.cell(total_row3, 6, (tot_non_twinlift / tot_evt) if tot_evt else 0)
     ws.cell(total_row3, 6).number_format = "0.0%"
     for c in range(1, 7):
         ws.cell(total_row3, c).font = Font(bold=True)
@@ -662,9 +674,9 @@ def build_excel_download(
     bar.set_categories(cats)
     ws.add_chart(bar, "H20")
 
-    # ---- Pie chart: Twinlift vs Bukan Twinlift (dari Combo) ----
+    # ---- Pie chart: Twinlift vs Bukan Twinlift (dari Total Event) ----
     pie_tw = PieChart()
-    pie_tw.title = "Twinlift vs Bukan Twinlift (dari Combo)"
+    pie_tw.title = "Twinlift vs Bukan Twinlift (dari Total Event)"
     data = Reference(ws, min_col=2, min_row=27, max_row=28)
     cats = Reference(ws, min_col=1, min_row=27, max_row=28)
     pie_tw.add_data(data)
@@ -701,7 +713,7 @@ def build_excel_download(
         bar4.type = "col"
         bar4.grouping = "percentStacked"
         bar4.overlap = 100
-        bar4.title = "Breakdown Bulanan: Twinlift vs Bukan Twinlift (% dari Combo)"
+        bar4.title = "Breakdown Bulanan: Twinlift vs Bukan Twinlift (% dari Total Event)"
         data4 = Reference(ws, min_col=3, max_col=4, min_row=header_row3, max_row=total_row3 - 1)
         cats4 = Reference(ws, min_col=1, min_row=header_row3 + 1, max_row=total_row3 - 1)
         bar4.add_data(data4, titles_from_data=True)
@@ -818,7 +830,7 @@ with st.expander("⚙️ Pengaturan Ambang Batas Analisis", expanded=False):
         )
     st.caption(f"Ukuran kontainer eligible untuk Combo/Twinlift dikunci **{SIZE_ELIGIBLE} ft**, mengikuti macro VBA.")
 
-st.subheader("1️⃣ Upload Data")
+st.subheader("📁 Upload Data")
 uploaded = st.file_uploader("Upload file .xlsx atau .csv", type=["xlsx", "xls", "csv"])
 
 if uploaded is None:
@@ -864,7 +876,12 @@ else:
 raw = sheets[sheet_name]
 st.caption(f"File terbaca: {len(raw)} baris data.")
 
-st.subheader("2️⃣ Pemetaan Kolom")
+# ----------------------------------------------------------------
+# Pemetaan kolom TIDAK ditampilkan lagi sbg langkah terpisah -- kolom
+# dideteksi otomatis di background pakai guess() (cocokkan nama kolom
+# yg mengandung kata kunci), supaya alurnya cukup: upload -> klik
+# jalankan -> langsung tampil dashboard, tanpa perlu isi form kolom.
+# ----------------------------------------------------------------
 cols = list(raw.columns)
 
 
@@ -876,24 +893,13 @@ def guess(options, keywords, default_idx=0):
     return default_idx
 
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    col_ves = st.selectbox("VES_ID", cols, index=guess(cols, ["ves"]))
-    col_size = st.selectbox("CTR_SIZE (ukuran kontainer)", cols, index=guess(cols, ["size", "ctr_size"]))
-with c2:
-    col_truck = st.selectbox("CAR_CHE_ID (truk)", cols, index=guess(cols, ["car_che", "truck", "che"]))
-    col_activity = st.selectbox("ACTIVITY", cols, index=guess(cols, ["activity", "aktivitas"]))
-with c3:
-    col_ts_g = st.selectbox("DISC_LOAD_TS", cols, index=guess(cols, ["disc_load", "disc_loading"]))
-    col_ts_h = st.selectbox("STACK_UNSTACK_TS", cols, index=guess(cols, ["stack_unstack", "unstack_stack"]))
-
 col_map = {
-    "ves_id": col_ves,
-    "size": col_size,
-    "truck": col_truck,
-    "activity": col_activity,
-    "ts_g": col_ts_g,
-    "ts_h": col_ts_h,
+    "ves_id": cols[guess(cols, ["ves"])],
+    "size": cols[guess(cols, ["size", "ctr_size"])],
+    "truck": cols[guess(cols, ["car_che", "truck", "che"])],
+    "activity": cols[guess(cols, ["activity", "aktivitas"])],
+    "ts_g": cols[guess(cols, ["disc_load", "disc_loading"])],
+    "ts_h": cols[guess(cols, ["stack_unstack", "unstack_stack"])],
 }
 
 run = st.button("▶️ Jalankan Analisis Dual Cycle", type="primary")
@@ -1080,67 +1086,67 @@ with tab_dual:
 with tab_twinlift:
     st.caption(
         "Twinlift = kontainer di dalam Combo 20ft, berasal dari kapal (VES_ID) & truk yang sama, "
-        f"dengan jarak DISC_LOAD_TS antar keduanya ≤ {hasil['ambang_twinlift']:g} menit."
+        f"dengan jarak DISC_LOAD_TS antar keduanya ≤ {hasil['ambang_twinlift']:g} menit. "
+        "Breakdown di bawah ini dihitung dari basis **Total Event**."
     )
 
-    t1, t2, t3, t4, t5 = st.columns(5)
-    t1.metric("Total Combo", summary["total_combo"])
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Total Event (Ritase)", summary["total_event"])
     t2.metric("Twinlift", summary["total_twinlift"])
-    t3.metric("Combo - Bukan Twinlift", summary["total_combo_bukan_twinlift"])
-    t4.metric("% Twinlift dari Combo", f"{summary['pct_twinlift_of_combo']*100:.1f}%")
-    t5.metric("% Twinlift dari Total Event", f"{summary['pct_twinlift_of_total']*100:.1f}%")
+    t3.metric("Bukan Twinlift", summary["total_non_twinlift"])
+    t4.metric("% Twinlift dari Total Event", f"{summary['pct_twinlift_of_total']*100:.1f}%")
 
     tc1, tc2 = st.columns(2)
 
     with tc1:
-        if summary["total_combo"] > 0:
+        if summary["total_event"] > 0:
             twin_df = pd.DataFrame(
                 {
                     "Status": ["Twinlift", "Bukan Twinlift"],
-                    "Jumlah": [summary["total_twinlift"], summary["total_combo_bukan_twinlift"]],
+                    "Jumlah": [summary["total_twinlift"], summary["total_non_twinlift"]],
                 }
             )
             fig_twin_pie = px.pie(
                 twin_df, names="Status", values="Jumlah", hole=0.45,
-                title="Twinlift vs Bukan Twinlift (dari Combo)",
+                title="Twinlift vs Bukan Twinlift (dari Total Event)",
                 color="Status",
                 color_discrete_map={"Twinlift": "#6A4C93", "Bukan Twinlift": "#C0C0C0"},
             )
             fig_twin_pie.update_traces(textinfo="percent+label")
             st.plotly_chart(fig_twin_pie, width='stretch')
         else:
-            st.info("Tidak ada event Combo pada data ini, sehingga tidak ada kandidat Twinlift.")
+            st.info("Tidak ada event pada data ini.")
 
     with tc2:
-        if len(monthly) > 0 and summary["total_combo"] > 0:
+        if len(monthly) > 0:
             monthly_twin_pct = monthly.melt(
                 id_vars="Bulan",
-                value_vars=["pct_twinlift_of_combo", "pct_combo_bukan_twinlift_of_combo"],
+                value_vars=["pct_twinlift", "pct_non_twinlift"],
                 var_name="Kategori",
                 value_name="Persentase",
             )
             monthly_twin_pct["Kategori"] = monthly_twin_pct["Kategori"].map(
-                {"pct_twinlift_of_combo": "Twinlift", "pct_combo_bukan_twinlift_of_combo": "Bukan Twinlift"}
+                {"pct_twinlift": "Twinlift", "pct_non_twinlift": "Bukan Twinlift"}
             )
             monthly_twin_pct["Persentase"] = monthly_twin_pct["Persentase"] * 100
 
             fig_month_twin = px.bar(
                 monthly_twin_pct, x="Bulan", y="Persentase", color="Kategori", barmode="stack",
-                title="Breakdown Bulanan: Twinlift vs Bukan Twinlift (% dari Combo)",
+                title="Breakdown Bulanan: Twinlift vs Bukan Twinlift (% dari Total Event)",
                 color_discrete_map={"Twinlift": "#6A4C93", "Bukan Twinlift": "#C0C0C0"},
                 text_auto=".1f",
             )
-            fig_month_twin.update_layout(yaxis=dict(title="% dari Total Combo", range=[0, 100]))
+            fig_month_twin.update_layout(yaxis=dict(title="% dari Total Event", range=[0, 100]))
             st.plotly_chart(fig_month_twin, width='stretch')
 
     if len(monthly) > 0:
-        with st.expander("📋 Tabel Breakdown Bulanan Twinlift (dari Combo, dalam persen)"):
+        with st.expander("📋 Tabel Breakdown Bulanan Twinlift (dari Total Event, dalam persen)"):
             tabel_twin = monthly[
-                ["Bulan", "combo", "twinlift", "combo_bukan_twinlift", "pct_twinlift_of_combo",
-                 "pct_combo_bukan_twinlift_of_combo"]
+                ["Bulan", "total_event", "twinlift", "non_twinlift", "pct_twinlift",
+                 "pct_non_twinlift"]
             ].copy()
             tabel_twin.columns = [
-                "Bulan", "Total Combo", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift",
+                "Bulan", "Total Event", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift",
             ]
             for c in ["% Twinlift", "% Bukan Twinlift"]:
                 tabel_twin[c] = (tabel_twin[c] * 100).round(1).astype(str) + "%"
