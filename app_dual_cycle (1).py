@@ -719,12 +719,18 @@ def build_excel_download(
 # ================================================================
 # ================================================================
 
-st.title("🚛 Dashboard Analisis Dual Cycle")
-st.caption(
-    "Port dari macro VBA Analisis Dual Cycle, plus tambahan analisis Twinlift. "
-    "Upload data mentah, atur ambang batas, lihat hasilnya dalam chart interaktif, "
-    "lalu download hasil analisis lengkap."
-)
+LOGO_PATH = "assets/logo_pelindo.png"
+
+col_judul, col_logo = st.columns([4, 1])
+with col_judul:
+    st.title("🚛 Dashboard Analisis Dual Cycle")
+    st.caption(
+        "Port dari macro VBA Analisis Dual Cycle, plus tambahan analisis Twinlift. "
+        "Upload data mentah, atur ambang batas, lihat hasilnya dalam chart interaktif, "
+        "lalu download hasil analisis lengkap."
+    )
+with col_logo:
+    st.image(LOGO_PATH, width='stretch')
 
 # ----------------------------------------------------------------
 # PENGATURAN -- ditaruh langsung di dashboard (bukan sidebar) biar
