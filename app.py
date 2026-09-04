@@ -553,7 +553,7 @@ def build_excel_data_only(out_df: pd.DataFrame) -> bytes:
 #   <folder app.py>/assets/logo_pelindo.png
 # ----------------------------------------------------------------
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-LOGO_CACA_ICON_PATH = ASSETS_DIR / "logo.png"
+LOGO_CACA_ICON_PATH = ASSETS_DIR / "caca.png"
 LOGO_PATH = ASSETS_DIR / "logo_pelindo.png"
 
 
