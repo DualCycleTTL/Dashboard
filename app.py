@@ -1277,31 +1277,69 @@ with tab_vessel:
 # ----------------------------------------------------------------
 with tab_download:
     st.write(f"Data hasil analisis ({len(out_df)} baris):")
-    st.dataframe(out_df, width='stretch', height=400)
+    # Preview dibatasi (bukan full 500rb baris) supaya rendering tabel ini
+    # tidak ikut membebani SETIAP rerun app -- lihat catatan di bawah soal
+    # kenapa semua isi tab dieksekusi ulang di tiap interaksi. Data lengkap
+    # tetap bisa didapat lewat tombol download di bawah.
+    st.dataframe(out_df.head(1000), width='stretch', height=400)
+    if len(out_df) > 1000:
+        st.caption(f"Menampilkan 1.000 baris pertama dari {len(out_df)} baris. Download file di bawah untuk data lengkap.")
 
-    try:
-        excel_bio = build_excel_download(
-            out_df, summary, hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"]
-        )
-    except Exception as e:
-        st.error(
-            "❌ Gagal membuat file Excel hasil analisis. Data hasil tetap bisa dilihat "
-            "di tabel & di-download sebagai CSV di bawah."
-        )
-        with st.expander("Detail error (untuk dilaporkan)"):
-            st.exception(e)
-        excel_bio = None
+    # ------------------------------------------------------------
+    # PENTING -- pembuatan file Excel (openpyxl, tulis ~500rb baris
+    # cell-per-cell) SANGAT BERAT dan TIDAK BOLEH dijalankan otomatis
+    # di setiap rerun script. Streamlit menjalankan ULANG SELURUH ISI
+    # SEMUA TAB (bukan cuma tab yang lagi dibuka) setiap kali ada
+    # interaksi apa pun di app -- termasuk ganti pilihan VES_ID di tab
+    # "Per Vessel". Kalau build_excel_download() dipanggil langsung di
+    # sini tanpa penjagaan, maka SETIAP interaksi (ganti dropdown, dll)
+    # akan memicu penulisan ulang file Excel raksasa ini, dan itu bisa
+    # bikin app melebihi batas memori/waktu di Streamlit Cloud lalu
+    # crash total ("Oh no").
+    #
+    # Solusinya: file Excel hanya dibangun SEKALI saat user menekan
+    # tombol "Siapkan File Excel", lalu hasilnya (bytes) disimpan di
+    # session_state dan dipakai ulang -- tidak dibangun ulang lagi
+    # selama hasil analisisnya ("hasil") belum berubah.
+    # ------------------------------------------------------------
+    hasil_sig = (
+        hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"], len(out_df),
+    )
+    if st.session_state.get("_excel_sig") != hasil_sig:
+        st.session_state.pop("_excel_bytes", None)
+        st.session_state["_excel_sig"] = hasil_sig
+
+    siapkan_excel = st.button("🔧 Siapkan File Excel (Data + Ringkasan + Chart)")
+
+    if siapkan_excel:
+        try:
+            with st.spinner("Membangun file Excel (data besar, mohon tunggu)..."):
+                excel_bio = build_excel_download(
+                    out_df, summary, hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"]
+                )
+                st.session_state["_excel_bytes"] = excel_bio.getvalue()
+        except Exception as e:
+            st.error(
+                "❌ Gagal membuat file Excel hasil analisis. Data hasil tetap bisa dilihat "
+                "di tabel & di-download sebagai CSV di bawah."
+            )
+            with st.expander("Detail error (untuk dilaporkan)"):
+                st.exception(e)
+
+    excel_bytes = st.session_state.get("_excel_bytes")
 
     dcol1, dcol2 = st.columns(2)
     with dcol1:
         st.download_button(
             "⬇️ Download Excel (Data + Ringkasan + Chart)",
-            data=excel_bio if excel_bio is not None else b"",
+            data=excel_bytes if excel_bytes is not None else b"",
             file_name="Hasil_Analisis_Dual_Cycle.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width='stretch',
-            disabled=excel_bio is None,
+            disabled=excel_bytes is None,
         )
+        if excel_bytes is None:
+            st.caption("Klik \"🔧 Siapkan File Excel\" dulu di atas untuk membuat filenya.")
     with dcol2:
         csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
