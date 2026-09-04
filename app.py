@@ -6,10 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
-from openpyxl import Workbook
-from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font
 
 st.set_page_config(page_title="Dashboard Analisis Dual Cycle", layout="wide")
@@ -226,7 +223,7 @@ def layer1_combo(df: pd.DataFrame, ambang_combo: float, size_eligible: int) -> p
 # LAYER 1b - TWINLIFT (sub-analisis di dalam grup Combo)
 # ================================================================
 
-def deteksi_twinlift(df_combo: pd.DataFrame, ambang_twinlift: float, size_eligible: int) -> dict:
+def deteksi_twinlift(df_combo: pd.DataFrame, ambang_twinlift: float, size_eligible: int):
     """
     Twinlift adalah kondisi khusus DI DALAM grup Combo (2 baris jadi 1
     event, lihat layer1_combo) yang memenuhi SEMUA syarat berikut:
@@ -241,13 +238,19 @@ def deteksi_twinlift(df_combo: pd.DataFrame, ambang_twinlift: float, size_eligib
     Twinlift, ditandai "-" (bukan "Bukan Twinlift") supaya gampang
     dibedakan dari Combo yang gagal syarat Twinlift.
 
-    Mengembalikan dict {GROUP_ID: status} dengan status salah satu dari
-    "Twinlift", "Bukan Twinlift", atau "-" (utk grup Single).
+    Mengembalikan 2 dict:
+      - status_map: {GROUP_ID: "Twinlift" / "Bukan Twinlift" / "-"}
+      - gap_map:    {GROUP_ID: selisih DISC_LOAD_TS dalam menit (float),
+                     None utk grup Single} -- disediakan supaya hasil
+                     bisa diaudit/dicek manual oleh user, bukan cuma
+                     dipercaya begitu saja sbg "black box".
     """
-    result = {}
+    status_map = {}
+    gap_map = {}
     for gid, g in df_combo.groupby("GROUP_ID"):
         if len(g) != 2:
-            result[gid] = "-"
+            status_map[gid] = "-"
+            gap_map[gid] = None
             continue
 
         g = g.sort_values("ROW_IDX")
@@ -258,12 +261,13 @@ def deteksi_twinlift(df_combo: pd.DataFrame, ambang_twinlift: float, size_eligib
         gap_disc_load = abs((r2["TS_G"] - r1["TS_G"]) / np.timedelta64(1, "m"))
         syarat_waktu = gap_disc_load <= ambang_twinlift
 
+        gap_map[gid] = round(float(gap_disc_load), 2)
         if syarat_size and syarat_kapal and syarat_waktu:
-            result[gid] = "Twinlift"
+            status_map[gid] = "Twinlift"
         else:
-            result[gid] = "Bukan Twinlift"
+            status_map[gid] = "Bukan Twinlift"
 
-    return result
+    return status_map, gap_map
 
 
 # ================================================================
@@ -385,12 +389,14 @@ def gabungkan_hasil(df: pd.DataFrame, events: pd.DataFrame, event_id_map: dict) 
     status_map = events.set_index("GROUP_ID")["STATUS"].to_dict()
     container_map = events.set_index("GROUP_ID")["CONTAINER_STATUS"].to_dict()
     twinlift_map = events.set_index("GROUP_ID")["TWINLIFT_STATUS"].to_dict()
+    twinlift_gap_map = events.set_index("GROUP_ID")["TWINLIFT_GAP_MENIT"].to_dict()
 
     out = df.copy()
     out["EVENT_ID"] = out["GROUP_ID"].map(event_id_map)
     out["CONTAINER_STATUS"] = out["GROUP_ID"].map(container_map)
     out["STATUS"] = out["GROUP_ID"].map(status_map)
     out["TWINLIFT_STATUS"] = out["GROUP_ID"].map(twinlift_map)
+    out["TWINLIFT_GAP_MENIT"] = out["GROUP_ID"].map(twinlift_gap_map)
     out = out.drop(columns=["GROUP_ID", "ROW_IDX"])
     return out
 
@@ -506,264 +512,30 @@ def hitung_ringkasan(events: pd.DataFrame, out_df: pd.DataFrame) -> dict:
 
 
 # ================================================================
-# EXPORT EXCEL (Data + Ringkasan + Chart), mirip output VBA
+# EXPORT EXCEL (DATA SAJA -- versi ringan)
+# ================================================================
+#
+# CATATAN PERFORMA: versi sebelumnya di sini membangun Excel dengan
+# sheet Ringkasan penuh + beberapa PieChart/BarChart openpyxl + tabel
+# breakdown bulanan, semuanya ditulis cell-per-cell. Itu berat & lambat
+# terutama utk data besar (ratusan ribu baris), dan bikin proses
+# "Download Hasil" jadi lelet. Sesuai permintaan, itu semua DIHAPUS.
+# Yang tersisa cuma sheet "Data" mentah, ditulis pakai pandas
+# ExcelWriter (jauh lebih ringan/cepat drpd loop manual + chart).
+# Kalau butuh ringkasan/chart, olah sendiri dari data mentah ini di
+# Excel/BI tool pilihan masing-masing.
 # ================================================================
 
-def build_excel_download(
-    out_df: pd.DataFrame, summary: dict, ambang_combo: float, ambang_dual: float, ambang_twinlift: float
-) -> BytesIO:
-    wb = Workbook()
-
-    # ---- Sheet Data ----
-    ws_data = wb.active
-    ws_data.title = "Data"
-
-    export_df = out_df.copy()
-    for c in export_df.columns:
-        if pd.api.types.is_datetime64_any_dtype(export_df[c]):
-            export_df[c] = export_df[c].dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    ws_data.append(list(export_df.columns))
-    for row in export_df.itertuples(index=False):
-        ws_data.append(list(row))
-    for cell in ws_data[1]:
-        cell.font = Font(bold=True)
-    for col_cells in ws_data.columns:
-        length = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells)
-        ws_data.column_dimensions[col_cells[0].column_letter].width = min(max(length + 2, 10), 40)
-
-    # ---- Sheet Ringkasan ----
-    ws = wb.create_sheet("Ringkasan Dual Cycle")
-    ws["A1"] = "RINGKASAN ANALISIS DUAL CYCLE"
-    ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = (
-        f"Ambang Combo: {ambang_combo:g} menit | Ambang Dual Cycle: {ambang_dual:g} menit | "
-        f"Ambang Twinlift: {ambang_twinlift:g} menit | Basis perhitungan: EVENT_ID (ritase) | "
-        f"Pairing dibatasi per truk (CAR_CHE_ID)"
-    )
-    ws["A2"].font = Font(italic=True)
-
-    ws["A4"] = "RINGKASAN (BERBASIS EVENT_ID / RITASE)"
-    ws["A4"].font = Font(bold=True)
-    ws["A5"], ws["B5"] = "Total Event (Ritase)", summary["total_event"]
-    ws["A6"], ws["B6"] = "Dual Cycle", summary["total_dual"]
-    ws["A6"].font = Font(bold=True)
-    ws["B6"].font = Font(bold=True)
-    ws["A7"], ws["B7"] = "Non Dual", summary["total_single"]
-    ws["A8"], ws["B8"] = "Persentase Dual Cycle", summary["pct_dual"]
-    ws["B8"].number_format = "0.0%"
-    ws["A8"].font = Font(bold=True)
-    ws["B8"].font = Font(bold=True)
-
-    ws["A10"] = "RINCIAN CONTAINER (BERBASIS EVENT_ID)"
-    ws["A10"].font = Font(bold=True)
-    ws["A11"], ws["B11"] = "Combo - Dual Cycle", summary["combo_dual"]
-    ws["A12"], ws["B12"] = "Combo - Non Dual", summary["combo_single"]
-    ws["A13"], ws["B13"] = "Single - Dual Cycle", summary["single_dual"]
-    ws["A14"], ws["B14"] = "Single - Non Dual", summary["single_single"]
-
-    ws["A16"] = "RINCIAN AKTIVITAS (BERBASIS BARIS LOAD/DISC -- INFO TAMBAHAN)"
-    ws["A16"].font = Font(bold=True)
-    ws["A17"], ws["B17"] = "Total aktivitas (baris)", len(out_df)
-    ws["A18"], ws["B18"] = "Dual Cycle - LOAD", summary["dual_load"]
-    ws["A19"], ws["B19"] = "Dual Cycle - DISC", summary["dual_disc"]
-    ws["A20"], ws["B20"] = "Non Dual - LOAD", summary["single_load"]
-    ws["A21"], ws["B21"] = "Non Dual - DISC", summary["single_disc"]
-    ws["A23"], ws["B23"] = "Jumlah Container - LOAD", summary["container_load"]
-    ws["A24"], ws["B24"] = "Jumlah Container - DISC", summary["container_disc"]
-
-    # ---- RINGKASAN TWINLIFT (basis: TOTAL EVENT) ----
-    ws["A25"] = "RINGKASAN TWINLIFT (BERBASIS TOTAL EVENT)"
-    ws["A25"].font = Font(bold=True)
-    ws["A26"], ws["B26"] = "Total Event (Ritase)", summary["total_event"]
-    ws["A27"], ws["B27"] = "Twinlift", summary["total_twinlift"]
-    ws["A27"].font = Font(bold=True)
-    ws["B27"].font = Font(bold=True)
-    ws["A28"], ws["B28"] = "Bukan Twinlift", summary["total_non_twinlift"]
-    ws["A29"], ws["B29"] = "% Twinlift dari Total Event", summary["pct_twinlift_of_total"]
-    ws["B29"].number_format = "0.0%"
-    ws["A30"], ws["B30"] = "% Bukan Twinlift dari Total Event", summary["pct_non_twinlift_of_total"]
-    ws["B30"].number_format = "0.0%"
-
-    ws["A32"] = "BREAKDOWN BULANAN: DUAL CYCLE VS NON DUAL (EVENT / RITASE)"
-    ws["A32"].font = Font(bold=True)
-    header_row = 33
-    headers = ["Bulan", "Total Event", "Dual Cycle", "Non Dual", "% Dual Cycle", "% Non Dual"]
-    for c_idx, label in enumerate(headers, start=1):
-        cell = ws.cell(header_row, c_idx, label)
-        cell.font = Font(bold=True)
-
-    monthly = summary["monthly"]
-    r = header_row
-    for bulan, row in monthly.iterrows():
-        r += 1
-        ws.cell(r, 1, str(bulan))
-        ws.cell(r, 2, int(row["total_event"]))
-        ws.cell(r, 3, int(row["dual"]))
-        ws.cell(r, 4, int(row["non_dual"]))
-        ws.cell(r, 5, float(row["pct_dual"]))
-        ws.cell(r, 5).number_format = "0.0%"
-        ws.cell(r, 6, float(row["pct_non_dual"]))
-        ws.cell(r, 6).number_format = "0.0%"
-
-    total_row = r + 1
-    tot_evt = int(monthly["total_event"].sum()) if len(monthly) else 0
-    tot_dual = int(monthly["dual"].sum()) if len(monthly) else 0
-    tot_non_dual = int(monthly["non_dual"].sum()) if len(monthly) else 0
-    ws.cell(total_row, 1, "Total")
-    ws.cell(total_row, 2, tot_evt)
-    ws.cell(total_row, 3, tot_dual)
-    ws.cell(total_row, 4, tot_non_dual)
-    ws.cell(total_row, 5, (tot_dual / tot_evt) if tot_evt else 0)
-    ws.cell(total_row, 5).number_format = "0.0%"
-    ws.cell(total_row, 6, (tot_non_dual / tot_evt) if tot_evt else 0)
-    ws.cell(total_row, 6).number_format = "0.0%"
-    for c in range(1, 7):
-        ws.cell(total_row, c).font = Font(bold=True)
-
-    # ---- Breakdown bulanan tambahan: Combo vs Single (%) ----
-    header_row2 = total_row + 3
-    ws.cell(header_row2 - 1, 1, "BREAKDOWN BULANAN: COMBO VS SINGLE (EVENT / RITASE)")
-    ws.cell(header_row2 - 1, 1).font = Font(bold=True)
-    headers2 = ["Bulan", "Total Event", "Combo", "Single", "% Combo", "% Single"]
-    for c_idx, label in enumerate(headers2, start=1):
-        cell = ws.cell(header_row2, c_idx, label)
-        cell.font = Font(bold=True)
-
-    r2 = header_row2
-    for bulan, row in monthly.iterrows():
-        r2 += 1
-        ws.cell(r2, 1, str(bulan))
-        ws.cell(r2, 2, int(row["total_event"]))
-        ws.cell(r2, 3, int(row["combo"]))
-        ws.cell(r2, 4, int(row["single"]))
-        ws.cell(r2, 5, float(row["pct_combo"]))
-        ws.cell(r2, 5).number_format = "0.0%"
-        ws.cell(r2, 6, float(row["pct_single"]))
-        ws.cell(r2, 6).number_format = "0.0%"
-
-    total_row2 = r2 + 1
-    tot_combo = int(monthly["combo"].sum()) if len(monthly) else 0
-    tot_single = int(monthly["single"].sum()) if len(monthly) else 0
-    ws.cell(total_row2, 1, "Total")
-    ws.cell(total_row2, 2, tot_evt)
-    ws.cell(total_row2, 3, tot_combo)
-    ws.cell(total_row2, 4, tot_single)
-    ws.cell(total_row2, 5, (tot_combo / tot_evt) if tot_evt else 0)
-    ws.cell(total_row2, 5).number_format = "0.0%"
-    ws.cell(total_row2, 6, (tot_single / tot_evt) if tot_evt else 0)
-    ws.cell(total_row2, 6).number_format = "0.0%"
-    for c in range(1, 7):
-        ws.cell(total_row2, c).font = Font(bold=True)
-
-    # ---- Breakdown bulanan tambahan: Twinlift vs Bukan Twinlift (dari Total Event, %) ----
-    header_row3 = total_row2 + 3
-    ws.cell(header_row3 - 1, 1, "BREAKDOWN BULANAN: TWINLIFT VS BUKAN TWINLIFT (DARI TOTAL EVENT, %)")
-    ws.cell(header_row3 - 1, 1).font = Font(bold=True)
-    headers3 = ["Bulan", "Total Event", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift"]
-    for c_idx, label in enumerate(headers3, start=1):
-        cell = ws.cell(header_row3, c_idx, label)
-        cell.font = Font(bold=True)
-
-    r3 = header_row3
-    for bulan, row in monthly.iterrows():
-        r3 += 1
-        ws.cell(r3, 1, str(bulan))
-        ws.cell(r3, 2, int(row["total_event"]))
-        ws.cell(r3, 3, int(row["twinlift"]))
-        ws.cell(r3, 4, int(row["non_twinlift"]))
-        ws.cell(r3, 5, float(row["pct_twinlift"]))
-        ws.cell(r3, 5).number_format = "0.0%"
-        ws.cell(r3, 6, float(row["pct_non_twinlift"]))
-        ws.cell(r3, 6).number_format = "0.0%"
-
-    total_row3 = r3 + 1
-    tot_twinlift = int(monthly["twinlift"].sum()) if len(monthly) else 0
-    tot_non_twinlift = int(monthly["non_twinlift"].sum()) if len(monthly) else 0
-    ws.cell(total_row3, 1, "Total")
-    ws.cell(total_row3, 2, tot_evt)
-    ws.cell(total_row3, 3, tot_twinlift)
-    ws.cell(total_row3, 4, tot_non_twinlift)
-    ws.cell(total_row3, 5, (tot_twinlift / tot_evt) if tot_evt else 0)
-    ws.cell(total_row3, 5).number_format = "0.0%"
-    ws.cell(total_row3, 6, (tot_non_twinlift / tot_evt) if tot_evt else 0)
-    ws.cell(total_row3, 6).number_format = "0.0%"
-    for c in range(1, 7):
-        ws.cell(total_row3, c).font = Font(bold=True)
-
-    ws.column_dimensions["A"].width = 46
-    for col in "BCDEF":
-        ws.column_dimensions[col].width = 15
-
-    # ---- Pie chart: Dual vs Non Dual ----
-    pie = PieChart()
-    pie.title = "Dual Cycle vs Non Dual (Event)"
-    data = Reference(ws, min_col=2, min_row=6, max_row=7)
-    cats = Reference(ws, min_col=1, min_row=6, max_row=7)
-    pie.add_data(data)
-    pie.set_categories(cats)
-    ws.add_chart(pie, "H4")
-
-    # ---- Bar chart: Container x Status ----
-    bar = BarChart()
-    bar.type = "col"
-    bar.title = "Container x Status (Event)"
-    data = Reference(ws, min_col=2, min_row=11, max_row=14)
-    cats = Reference(ws, min_col=1, min_row=11, max_row=14)
-    bar.add_data(data)
-    bar.set_categories(cats)
-    ws.add_chart(bar, "H20")
-
-    # ---- Pie chart: Twinlift vs Bukan Twinlift (dari Total Event) ----
-    pie_tw = PieChart()
-    pie_tw.title = "Twinlift vs Bukan Twinlift (dari Total Event)"
-    data = Reference(ws, min_col=2, min_row=27, max_row=28)
-    cats = Reference(ws, min_col=1, min_row=27, max_row=28)
-    pie_tw.add_data(data)
-    pie_tw.set_categories(cats)
-    ws.add_chart(pie_tw, "H36")
-
-    # ---- Stacked bar (%): breakdown bulanan Dual Cycle vs Non Dual ----
-    if len(monthly) > 0:
-        bar2 = BarChart()
-        bar2.type = "col"
-        bar2.grouping = "percentStacked"
-        bar2.overlap = 100
-        bar2.title = "Breakdown Bulanan: Dual Cycle vs Non Dual (%)"
-        data = Reference(ws, min_col=3, max_col=4, min_row=header_row, max_row=total_row - 1)
-        cats = Reference(ws, min_col=1, min_row=header_row + 1, max_row=total_row - 1)
-        bar2.add_data(data, titles_from_data=True)
-        bar2.set_categories(cats)
-        ws.add_chart(bar2, "H52")
-
-        # ---- Stacked bar (%): breakdown bulanan Combo vs Single ----
-        bar3 = BarChart()
-        bar3.type = "col"
-        bar3.grouping = "percentStacked"
-        bar3.overlap = 100
-        bar3.title = "Breakdown Bulanan: Combo vs Single (%)"
-        data3 = Reference(ws, min_col=3, max_col=4, min_row=header_row2, max_row=total_row2 - 1)
-        cats3 = Reference(ws, min_col=1, min_row=header_row2 + 1, max_row=total_row2 - 1)
-        bar3.add_data(data3, titles_from_data=True)
-        bar3.set_categories(cats3)
-        ws.add_chart(bar3, "H68")
-
-        # ---- Stacked bar (%): breakdown bulanan Twinlift vs Bukan Twinlift ----
-        bar4 = BarChart()
-        bar4.type = "col"
-        bar4.grouping = "percentStacked"
-        bar4.overlap = 100
-        bar4.title = "Breakdown Bulanan: Twinlift vs Bukan Twinlift (% dari Total Event)"
-        data4 = Reference(ws, min_col=3, max_col=4, min_row=header_row3, max_row=total_row3 - 1)
-        cats4 = Reference(ws, min_col=1, min_row=header_row3 + 1, max_row=total_row3 - 1)
-        bar4.add_data(data4, titles_from_data=True)
-        bar4.set_categories(cats4)
-        ws.add_chart(bar4, "H84")
-
+def build_excel_data_only(out_df: pd.DataFrame) -> bytes:
     bio = BytesIO()
-    wb.save(bio)
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        out_df.to_excel(writer, index=False, sheet_name="Data")
+        ws = writer.sheets["Data"]
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        ws.freeze_panes = "A2"
     bio.seek(0)
-    return bio
+    return bio.getvalue()
 
 
 # ================================================================
@@ -978,9 +750,10 @@ if run:
                 st.stop()
 
             df_combo = layer1_combo(df, ambang_combo, size_eligible)
-            twinlift_map = deteksi_twinlift(df_combo, ambang_twinlift, size_eligible)
+            twinlift_status_map, twinlift_gap_map = deteksi_twinlift(df_combo, ambang_twinlift, size_eligible)
             events = bentuk_event(df_combo)
-            events["TWINLIFT_STATUS"] = events["GROUP_ID"].map(twinlift_map)
+            events["TWINLIFT_STATUS"] = events["GROUP_ID"].map(twinlift_status_map)
+            events["TWINLIFT_GAP_MENIT"] = events["GROUP_ID"].map(twinlift_gap_map)
             events = layer2_dual(events, ambang_dual)
             events, event_id_map = beri_event_id(events, df_combo)
             out_df = gabungkan_hasil(df_combo, events, event_id_map)
@@ -1002,11 +775,30 @@ if run:
         "ambang_dual": ambang_dual,
         "ambang_twinlift": ambang_twinlift,
     }
+    # settingan yg dipakai run terakhir -- dipakai buat deteksi "pengaturan
+    # sudah diubah tapi belum di-apply" (lihat blok peringatan di bawah)
+    st.session_state["_ambang_terakhir"] = (ambang_combo, ambang_dual, ambang_twinlift)
 
 hasil = st.session_state["hasil"]
 out_df = hasil["out_df"]
 events = hasil["events"]
 summary = hasil["summary"]
+
+# ----------------------------------------------------------------
+# Peringatan kalau ambang batas di panel Pengaturan sudah diubah user
+# TAPI tombol "Jalankan Analisis" belum diklik ulang -- supaya hasil
+# yang ditampilkan tidak disangka pakai ambang yang baru padahal masih
+# pakai ambang yang lama (sumber kebingungan paling umum).
+# ----------------------------------------------------------------
+_ambang_terakhir = st.session_state.get(
+    "_ambang_terakhir", (hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"])
+)
+if (ambang_combo, ambang_dual, ambang_twinlift) != _ambang_terakhir:
+    st.warning(
+        "⚠️ Ambang batas di Pengaturan sudah diubah tapi belum diterapkan. "
+        "Hasil di bawah masih pakai ambang yang lama — klik "
+        "\"▶️ Jalankan Analisis Dual Cycle\" lagi untuk memperbarui."
+    )
 
 st.success("Analisis selesai!")
 
@@ -1171,19 +963,6 @@ with tab_twinlift:
             fig_month_twin.update_layout(yaxis=dict(title="% dari Total Event", range=[0, 100]))
             st.plotly_chart(fig_month_twin, width='stretch')
 
-    if len(monthly) > 0:
-        with st.expander("📋 Tabel Breakdown Bulanan Twinlift (dari Total Event, dalam persen)"):
-            tabel_twin = monthly[
-                ["Bulan", "total_event", "twinlift", "non_twinlift", "pct_twinlift",
-                 "pct_non_twinlift"]
-            ].copy()
-            tabel_twin.columns = [
-                "Bulan", "Total Event", "Twinlift", "Bukan Twinlift", "% Twinlift", "% Bukan Twinlift",
-            ]
-            for c in ["% Twinlift", "% Bukan Twinlift"]:
-                tabel_twin[c] = (tabel_twin[c] * 100).round(1).astype(str) + "%"
-            st.dataframe(tabel_twin, width='stretch', hide_index=True)
-
 # ----------------------------------------------------------------
 # TAB 3: ANALISIS PER VESSEL
 # ----------------------------------------------------------------
@@ -1269,9 +1048,6 @@ with tab_vessel:
         )
         st.plotly_chart(fig_v3, width='stretch')
 
-        with st.expander(f"📋 Data Aktivitas — {selected_vessel} ({total_rec} baris)"):
-            st.dataframe(vessel_df, width='stretch', height=350)
-
 # ----------------------------------------------------------------
 # TAB 4: DOWNLOAD HASIL ANALISIS
 # ----------------------------------------------------------------
@@ -1286,66 +1062,49 @@ with tab_download:
         st.caption(f"Menampilkan 1.000 baris pertama dari {len(out_df)} baris. Download file di bawah untuk data lengkap.")
 
     # ------------------------------------------------------------
-    # PENTING -- pembuatan file Excel (openpyxl, tulis ~500rb baris
-    # cell-per-cell) SANGAT BERAT dan TIDAK BOLEH dijalankan otomatis
-    # di setiap rerun script. Streamlit menjalankan ULANG SELURUH ISI
-    # SEMUA TAB (bukan cuma tab yang lagi dibuka) setiap kali ada
-    # interaksi apa pun di app -- termasuk ganti pilihan VES_ID di tab
-    # "Per Vessel". Kalau build_excel_download() dipanggil langsung di
-    # sini tanpa penjagaan, maka SETIAP interaksi (ganti dropdown, dll)
-    # akan memicu penulisan ulang file Excel raksasa ini, dan itu bisa
-    # bikin app melebihi batas memori/waktu di Streamlit Cloud lalu
-    # crash total ("Oh no").
+    # PENTING -- pembuatan file (CSV/Excel) dari data besar (bisa
+    # ratusan ribu baris) TIDAK BOLEH dijalankan otomatis di setiap
+    # rerun script. Streamlit menjalankan ULANG SELURUH ISI SEMUA TAB
+    # (bukan cuma tab yang lagi dibuka) setiap kali ada interaksi apa
+    # pun di app -- termasuk ganti pilihan VES_ID di tab "Per Vessel".
+    # Kalau data di-generate ulang langsung di sini tanpa penjagaan,
+    # SETIAP interaksi (ganti dropdown, dll) akan memicu penulisan
+    # ulang file, dan itu bisa bikin app lambat / boros memori.
     #
-    # Solusinya: file Excel hanya dibangun SEKALI saat user menekan
-    # tombol "Siapkan File Excel", lalu hasilnya (bytes) disimpan di
-    # session_state dan dipakai ulang -- tidak dibangun ulang lagi
-    # selama hasil analisisnya ("hasil") belum berubah.
+    # Solusinya: CSV & Excel dibangun cuma SEKALI per hasil analisis
+    # (di-cache di session_state, dikunci oleh signature dari hasil),
+    # bukan dibangun ulang di setiap rerun selama hasilnya belum ganti.
+    # Excel di sini SENGAJA versi ringan (data saja, tanpa sheet
+    # Ringkasan & tanpa chart) supaya proses download tetap cepat.
     # ------------------------------------------------------------
     hasil_sig = (
         hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"], len(out_df),
     )
-    if st.session_state.get("_excel_sig") != hasil_sig:
+    if st.session_state.get("_download_sig") != hasil_sig:
+        st.session_state.pop("_csv_bytes", None)
         st.session_state.pop("_excel_bytes", None)
-        st.session_state["_excel_sig"] = hasil_sig
+        st.session_state["_download_sig"] = hasil_sig
 
-    siapkan_excel = st.button("🔧 Siapkan File Excel (Data + Ringkasan + Chart)")
-
-    if siapkan_excel:
-        try:
-            with st.spinner("Membangun file Excel (data besar, mohon tunggu)..."):
-                excel_bio = build_excel_download(
-                    out_df, summary, hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"]
-                )
-                st.session_state["_excel_bytes"] = excel_bio.getvalue()
-        except Exception as e:
-            st.error(
-                "❌ Gagal membuat file Excel hasil analisis. Data hasil tetap bisa dilihat "
-                "di tabel & di-download sebagai CSV di bawah."
-            )
-            with st.expander("Detail error (untuk dilaporkan)"):
-                st.exception(e)
-
-    excel_bytes = st.session_state.get("_excel_bytes")
+    if "_csv_bytes" not in st.session_state:
+        st.session_state["_csv_bytes"] = out_df.to_csv(index=False).encode("utf-8-sig")
+    if "_excel_bytes" not in st.session_state:
+        with st.spinner("Menyiapkan file Excel (data saja, ringan & cepat)..."):
+            st.session_state["_excel_bytes"] = build_excel_data_only(out_df)
 
     dcol1, dcol2 = st.columns(2)
     with dcol1:
         st.download_button(
-            "⬇️ Download Excel (Data + Ringkasan + Chart)",
-            data=excel_bytes if excel_bytes is not None else b"",
-            file_name="Hasil_Analisis_Dual_Cycle.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width='stretch',
-            disabled=excel_bytes is None,
-        )
-        if excel_bytes is None:
-            st.caption("Klik \"🔧 Siapkan File Excel\" dulu di atas untuk membuat filenya.")
-    with dcol2:
-        csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Download CSV (Data saja)",
-            data=csv_bytes,
+            "⬇️ Download CSV (Data)",
+            data=st.session_state["_csv_bytes"],
             file_name="Hasil_Analisis_Dual_Cycle.csv",
             mime="text/csv",
+            width='stretch',
+        )
+    with dcol2:
+        st.download_button(
+            "⬇️ Download Excel (Data)",
+            data=st.session_state["_excel_bytes"],
+            file_name="Hasil_Analisis_Dual_Cycle.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width='stretch',
         )
