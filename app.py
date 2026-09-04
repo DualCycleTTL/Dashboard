@@ -66,9 +66,29 @@ def baca_file(file_bytes: bytes, filename: str, sheet_name=None):
     return {name: xls.parse(name) for name in xls.sheet_names}
 
 
+def bersihkan_ves_id(series: pd.Series) -> pd.Series:
+    """
+    Normalisasi kolom VES_ID jadi string biasa (dtype object), bukan
+    dtype 'string'/ArrowDtype bawaan pandas versi baru. Ini PENTING
+    karena .astype(str) pada kolom ber-dtype 'string' TIDAK mengubah
+    nilai NaN/NA jadi teks "nan" -- NaN tetap float, sehingga tercampur
+    dengan string lain dan bikin sorted()/unique() gagal dengan
+    TypeError: '<' not supported between instances of 'float' and 'str'.
+
+    Nilai kosong/NaN diseragamkan jadi pd.NA (bukan string "nan"),
+    dan whitespace di depan/belakang dibuang (spasi ekor sering muncul
+    di data VES_ID mentah, mis. "HUHE010     ").
+    """
+    s = series.astype("object")
+    s = s.where(~pd.isna(s), pd.NA)  # tandai semua bentuk kosong (NaN/None/NA) secara seragam
+    s = s.map(lambda v: v.strip() if isinstance(v, str) else v)
+    s = s.map(lambda v: pd.NA if isinstance(v, str) and v == "" else v)
+    return s
+
+
 def siapkan_data(raw: pd.DataFrame, col_map: dict, size_eligible: int) -> pd.DataFrame:
     df = pd.DataFrame()
-    df["VES_ID"] = raw[col_map["ves_id"]]
+    df["VES_ID"] = bersihkan_ves_id(raw[col_map["ves_id"]])
     df["CTR_SIZE"] = raw[col_map["size"]].apply(vba_val)
     df["CAR_CHE_ID"] = raw[col_map["truck"]].astype(str).str.strip()
     df["ACTIVITY"] = raw[col_map["activity"]].apply(klasifikasi_activity)
@@ -100,6 +120,26 @@ def siapkan_data(raw: pd.DataFrame, col_map: dict, size_eligible: int) -> pd.Dat
             f"(tanggal dummy 29 Des 1899), bukan dibuang, supaya total & "
             f"persentase persis sama dengan hasil macro VBA."
         )
+
+    # ------------------------------------------------------------
+    # VES_ID kosong: baris TETAP diproses (tidak dibuang) supaya
+    # Total Event/Dual Cycle/Combo tetap identik dengan VBA -- VES_ID
+    # tidak dipakai sama sekali di layer Combo/Dual/Twinlift, cuma
+    # dipakai belakangan di tab "Per Vessel". Baris begini ditandai
+    # placeholder "(VES_ID Kosong)" supaya:
+    #   1) tidak bikin error TypeError saat sorting di tab Per Vessel
+    #      (lihat bersihkan_ves_id di atas kenapa NaN mentah bermasalah),
+    #   2) tetap kelihatan/terlacak sbg baris data yang datanya kurang
+    #      lengkap, bukan hilang diam-diam atau nyasar gabung ke kapal lain.
+    # ------------------------------------------------------------
+    ves_kosong = df["VES_ID"].isna()
+    if ves_kosong.any():
+        st.warning(
+            f"{int(ves_kosong.sum())} baris punya VES_ID kosong. Baris ini tetap "
+            f"diproses di analisis Dual Cycle/Twinlift (tidak dibuang), tapi di tab "
+            f"'Per Vessel' dikelompokkan terpisah sbg \"(VES_ID Kosong)\"."
+        )
+        df.loc[ves_kosong, "VES_ID"] = "(VES_ID Kosong)"
 
     df = df.reset_index(drop=True)
     df["ROW_IDX"] = df.index
@@ -1153,14 +1193,25 @@ with tab_vessel:
         "dihitung dari seluruh aktivitas (baris LOAD/DISC) milik kapal tersebut."
     )
 
-    vessel_options = sorted(out_df["VES_ID"].astype(str).unique().tolist())
+    # ------------------------------------------------------------
+    # Jaring pengaman kedua: pastikan VES_ID benar-benar bersih
+    # (dropna dulu, baru astype(str)+strip) sebelum di-sort. Kalau
+    # langsung .astype(str) pada kolom yang masih mengandung NaN asli
+    # (mis. dari file lama sebelum siapkan_data() diperbaiki, atau
+    # dari sumber out_df lain), NaN bisa tetap jadi float, bukan
+    # ter-konversi ke teks "nan" -- dan itu bikin sorted() gagal
+    # dengan TypeError ('<' not supported between float dan str).
+    # ------------------------------------------------------------
+    ves_id_bersih = out_df["VES_ID"].dropna().astype(str).str.strip()
+    ves_id_bersih = ves_id_bersih[ves_id_bersih != ""]
+    vessel_options = sorted(ves_id_bersih.unique().tolist())
 
     if len(vessel_options) == 0:
         st.info("Tidak ada data VES_ID pada hasil analisis ini.")
     else:
         selected_vessel = st.selectbox("🔍 Cari / pilih VES_ID", vessel_options)
 
-        vessel_df = out_df[out_df["VES_ID"].astype(str) == selected_vessel]
+        vessel_df = out_df[out_df["VES_ID"].astype(str).str.strip() == selected_vessel]
 
         total_rec = len(vessel_df)
         dual_rec = int((vessel_df["STATUS"] == "Dual Cycle").sum())
