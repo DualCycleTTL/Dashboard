@@ -1,6 +1,7 @@
 import io
 import re
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -719,18 +720,43 @@ def build_excel_download(
 # ================================================================
 # ================================================================
 
-LOGO_PATH = "assets/logo_pelindo.png"
+# ----------------------------------------------------------------
+# Path logo dihitung RELATIF terhadap lokasi file app.py ini sendiri
+# (bukan relatif terhadap current working directory), supaya tetap
+# ketemu walau di-deploy di Streamlit Cloud yang CWD-nya bisa beda
+# dari folder script. File logo harus ada di:
+#   <folder app.py>/assets/logo_caca.png
+#   <folder app.py>/assets/logo_pelindo.png
+# ----------------------------------------------------------------
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+LOGO_CACA_PATH = ASSETS_DIR / "logo_caca.png"
+LOGO_PATH = ASSETS_DIR / "logo_pelindo.png"
 
-col_judul, col_logo = st.columns([4, 1])
-with col_judul:
-    st.title("🚛 Dashboard Analisis Dual Cycle")
-    st.caption(
-        "Port dari macro VBA Analisis Dual Cycle, plus tambahan analisis Twinlift. "
-        "Upload data mentah, atur ambang batas, lihat hasilnya dalam chart interaktif, "
-        "lalu download hasil analisis lengkap."
-    )
-with col_logo:
-    st.image(LOGO_PATH, width='stretch')
+
+def _tampilkan_logo(path: Path, lebar: int = None):
+    if path.exists():
+        if lebar:
+            st.image(str(path), width=lebar)
+        else:
+            st.image(str(path), width='stretch')
+    else:
+        st.caption(
+            f"⚠️ Logo tidak ditemukan di `{path}`. Pastikan file ikut "
+            "di-upload/commit satu paket dengan app.py."
+        )
+
+
+col_logo_kiri, col_tengah, col_logo_kanan = st.columns([1, 3, 1])
+with col_logo_kiri:
+    _tampilkan_logo(LOGO_CACA_PATH)
+with col_logo_kanan:
+    _tampilkan_logo(LOGO_PATH)
+
+st.caption(
+    "Port dari macro VBA Analisis Dual Cycle, plus tambahan analisis Twinlift. "
+    "Upload data mentah, atur ambang batas, lihat hasilnya dalam chart interaktif, "
+    "lalu download hasil analisis lengkap."
+)
 
 # ----------------------------------------------------------------
 # PENGATURAN -- ditaruh langsung di dashboard (bukan sidebar) biar
