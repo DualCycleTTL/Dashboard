@@ -594,7 +594,7 @@ def _render_header(icon_path: Path, brand_path: Path):
                     <div style="font-size:2.1rem;font-weight:800;color:#16324f;
                                 letter-spacing:0.5px;line-height:1;margin:0;">CACA</div>
                 </div>
-                <div style="font-size:0.85rem;color:#6b7280;line-height:1;
+                <div style="font-size:0.85rem;color:#6b7280;line-height:-10;
                             margin:-10px 0 0 0;">
                     Cycle Analysis and Cargo Optimalization
                 </div>
