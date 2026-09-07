@@ -589,7 +589,7 @@ def _render_header(icon_path: Path, brand_path: Path):
         <div style="display:flex;align-items:center;justify-content:space-between;
                     padding:6px 0 2px 0;">
             <div>
-                <div style="display:flex;align-items:center;gap:14px;">
+                <div style="display:flex;align-items:flex-end;gap:8px;">
                     {icon_html}
                     <div style="font-size:2.1rem;font-weight:800;color:#16324f;
                                 letter-spacing:0.5px;line-height:1;margin:0;">CACA</div>
