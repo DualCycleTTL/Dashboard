@@ -620,6 +620,19 @@ def _render_header(icon_path: Path, text_path: Path, brand_path: Path):
         st.caption(f"⚠️ Logo Pelindo tidak ditemukan di `{brand_path}`.")
 
 
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-left: 2rem;
+        padding-right: 2rem;
+        padding-top: 2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 _render_header(LOGO_CACA_ICON_PATH, LOGO_CACA_TEXT_PATH, LOGO_PATH)
 st.divider()
 
