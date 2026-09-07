@@ -601,8 +601,8 @@ def _render_header(icon_path: Path, brand_path: Path):
                 <div style="display:flex;align-items:flex-end;gap:10px;">
                     {icon_html}
                     <div style="font-family:'Anton',sans-serif;font-size:2.2rem;
-                                font-weight:400;color:#16324f;letter-spacing:0px;
-                                line-height:0;margin:0;">CACA</div>
+                                font-weight:400;color:#16324f;letter-spacing:0.5px;
+                                line-height:0.5;margin:0;">CACA</div>
                 </div>
                 <div style="font-size:0.78rem;color:#6b7280;line-height:1;
                             margin:3px 0 0 0;">
