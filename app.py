@@ -575,7 +575,7 @@ def _render_header(icon_path: Path, brand_path: Path):
 
     icon_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(icon_path)}" '
-        f'style="height:150px;width:auto;display:block;" />'
+        f'style="height:110px;width:auto;display:block;" />'
         if icon_ok else ""
     )
     brand_html = (
