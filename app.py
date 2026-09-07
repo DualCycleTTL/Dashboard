@@ -575,12 +575,12 @@ def _render_header(icon_path: Path, brand_path: Path):
 
     icon_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(icon_path)}" '
-        f'style="height:80px;width:auto;display:block;" />'
+        f'style="height:56px;width:auto;display:block;" />'
         if icon_ok else ""
     )
     brand_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(brand_path)}" '
-        f'style="height:96px;width:auto;display:block;" />'
+        f'style="height:56px;width:auto;display:block;" />'
         if brand_ok else ""
     )
 
@@ -589,13 +589,13 @@ def _render_header(icon_path: Path, brand_path: Path):
         <div style="display:flex;align-items:center;justify-content:space-between;
                     padding:6px 0 2px 0;">
             <div>
-                <div style="display:flex;align-items:center;gap:12px;">
+                <div style="display:flex;align-items:flex-end;gap:10px;">
                     {icon_html}
-                    <div style="font-size:2.1rem;font-weight:800;color:#16324f;
-                                letter-spacing:0.5px;line-height:3;margin:0;">CACA</div>
+                    <div style="font-size:1.9rem;font-weight:800;color:#16324f;
+                                letter-spacing:0.5px;line-height:1;margin:0;">CACA</div>
                 </div>
-                <div style="font-size:0.85rem;color:#6b7280;line-height:1;
-                            margin:0px 0 0 0;">
+                <div style="font-size:0.78rem;color:#6b7280;line-height:1;
+                            margin:3px 0 0 0;">
                     Cycle Analysis and Cargo Optimalization
                 </div>
             </div>
@@ -1070,15 +1070,21 @@ with tab_download:
     # rerun script. Streamlit menjalankan ULANG SELURUH ISI SEMUA TAB
     # (bukan cuma tab yang lagi dibuka) setiap kali ada interaksi apa
     # pun di app -- termasuk ganti pilihan VES_ID di tab "Per Vessel".
-    # Kalau data di-generate ulang langsung di sini tanpa penjagaan,
-    # SETIAP interaksi (ganti dropdown, dll) akan memicu penulisan
-    # ulang file, dan itu bisa bikin app lambat / boros memori.
     #
-    # Solusinya: CSV & Excel dibangun cuma SEKALI per hasil analisis
-    # (di-cache di session_state, dikunci oleh signature dari hasil),
-    # bukan dibangun ulang di setiap rerun selama hasilnya belum ganti.
-    # Excel di sini SENGAJA versi ringan (data saja, tanpa sheet
-    # Ringkasan & tanpa chart) supaya proses download tetap cepat.
+    # BUG YANG SUDAH DIPERBAIKI: versi sebelumnya membangun CSV/Excel
+    # otomatis begitu belum ada di cache. Untuk data ratusan ribu baris,
+    # build Excel (openpyxl) itu berat -- kalau attempt pertama gagal
+    # (mis. kehabisan memori di server gratis), maka SETIAP rerun
+    # berikutnya (termasuk sekadar ganti dropdown VES_ID di tab lain)
+    # otomatis MENCOBA LAGI proses berat yang sama, dan gagal lagi.
+    # Ini yang bikin app kelihatan "error pas ganti VES_ID", padahal
+    # akar masalahnya adalah proses Excel yang re-trigger terus.
+    #
+    # Solusinya: build CSV & Excel HANYA saat user menekan tombol
+    # "Siapkan File Download" secara eksplisit. Hasilnya (bytes)
+    # disimpan di session_state, dipakai ulang selama hasil analisis
+    # ("hasil") belum berubah -- TIDAK dibangun ulang otomatis di
+    # rerun mana pun, apalagi cuma gara-gara ganti dropdown di tab lain.
     # ------------------------------------------------------------
     hasil_sig = (
         hasil["ambang_combo"], hasil["ambang_dual"], hasil["ambang_twinlift"], len(out_df),
@@ -1088,26 +1094,39 @@ with tab_download:
         st.session_state.pop("_excel_bytes", None)
         st.session_state["_download_sig"] = hasil_sig
 
-    if "_csv_bytes" not in st.session_state:
-        st.session_state["_csv_bytes"] = out_df.to_csv(index=False).encode("utf-8-sig")
-    if "_excel_bytes" not in st.session_state:
-        with st.spinner("Menyiapkan file Excel (data saja, ringan & cepat)..."):
-            st.session_state["_excel_bytes"] = build_excel_data_only(out_df)
+    csv_ready = "_csv_bytes" in st.session_state
+    excel_ready = "_excel_bytes" in st.session_state
+
+    if not (csv_ready and excel_ready):
+        siapkan = st.button("🔧 Siapkan File Download (CSV & Excel)", type="primary")
+        if siapkan:
+            with st.spinner(f"Menyiapkan file dari {len(out_df)} baris data..."):
+                st.session_state["_csv_bytes"] = out_df.to_csv(index=False).encode("utf-8-sig")
+                st.session_state["_excel_bytes"] = build_excel_data_only(out_df)
+            st.rerun()
+        else:
+            st.info(
+                "👆 Klik tombol di atas untuk menyiapkan file CSV & Excel. "
+                "Sengaja tidak otomatis supaya interaksi lain di app (mis. ganti "
+                "VES_ID di tab Per Vessel) tetap ringan & tidak memicu proses berat ini."
+            )
 
     dcol1, dcol2 = st.columns(2)
     with dcol1:
         st.download_button(
             "⬇️ Download CSV (Data)",
-            data=st.session_state["_csv_bytes"],
+            data=st.session_state.get("_csv_bytes", b""),
             file_name="Hasil_Analisis_Dual_Cycle.csv",
             mime="text/csv",
             width='stretch',
+            disabled=not csv_ready,
         )
     with dcol2:
         st.download_button(
             "⬇️ Download Excel (Data)",
-            data=st.session_state["_excel_bytes"],
+            data=st.session_state.get("_excel_bytes", b""),
             file_name="Hasil_Analisis_Dual_Cycle.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width='stretch',
+            disabled=not excel_ready,
         )
