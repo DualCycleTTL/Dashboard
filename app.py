@@ -554,6 +554,7 @@ def build_excel_data_only(out_df: pd.DataFrame) -> bytes:
 # ----------------------------------------------------------------
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 LOGO_CACA_ICON_PATH = ASSETS_DIR / "CACA.png"
+LOGO_CACA_TEXT_PATH = ASSETS_DIR / "logo_caca_text.png"
 LOGO_PATH = ASSETS_DIR / "pelindo.png"
 
 
@@ -562,21 +563,28 @@ def _img_to_base64(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
-def _render_header(icon_path: Path, brand_path: Path):
+def _render_header(icon_path: Path, text_path: Path, brand_path: Path):
     """
     Header custom pakai flexbox HTML (bukan st.columns). Layout:
-    baris atas = ikon CACA sejajar dengan teks "CACA" (align-items:
-    center), baris di bawahnya = kepanjangan "Cycle Analysis and
-    Cargo Optimalization" yang membentang di bawah ikon+teks (bukan
-    cuma di bawah teks CACA saja). Logo Pelindo tetap di kanan.
+    baris atas = ikon CACA sejajar dengan GAMBAR teks "CACA" (bukan
+    teks HTML biasa -- ini crop langsung dari file logo asli supaya
+    font-nya persis sama dengan desain logo, bukan font browser),
+    baris di bawahnya = kepanjangan "Cycle Analysis and Cargo
+    Optimalization". Logo Pelindo tetap di kanan.
     """
     icon_ok = icon_path.exists()
+    text_ok = text_path.exists()
     brand_ok = brand_path.exists()
 
     icon_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(icon_path)}" '
         f'style="height:56px;width:auto;display:block;" />'
         if icon_ok else ""
+    )
+    text_html = (
+        f'<img src="data:image/png;base64,{_img_to_base64(text_path)}" '
+        f'style="height:40px;width:auto;display:block;" />'
+        if text_ok else '<div style="font-size:1.9rem;font-weight:800;">CACA</div>'
     )
     brand_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(brand_path)}" '
@@ -591,8 +599,7 @@ def _render_header(icon_path: Path, brand_path: Path):
             <div>
                 <div style="display:flex;align-items:flex-end;gap:10px;">
                     {icon_html}
-                    <div style="font-size:1.9rem;font-weight:800;color:#16324f;
-                                letter-spacing:0.5px;line-height:1;margin:0;">CACA</div>
+                    {text_html}
                 </div>
                 <div style="font-size:0.78rem;color:#6b7280;line-height:1;
                             margin:3px 0 0 0;">
@@ -604,6 +611,8 @@ def _render_header(icon_path: Path, brand_path: Path):
         """,
         unsafe_allow_html=True,
     )
+    if not text_ok:
+        st.caption(f"⚠️ Gambar teks CACA tidak ditemukan di `{text_path}`.")
 
     if not icon_ok:
         st.caption(f"⚠️ Logo CACA tidak ditemukan di `{icon_path}`.")
@@ -611,7 +620,7 @@ def _render_header(icon_path: Path, brand_path: Path):
         st.caption(f"⚠️ Logo Pelindo tidak ditemukan di `{brand_path}`.")
 
 
-_render_header(LOGO_CACA_ICON_PATH, LOGO_PATH)
+_render_header(LOGO_CACA_ICON_PATH, LOGO_CACA_TEXT_PATH, LOGO_PATH)
 st.divider()
 
 # ----------------------------------------------------------------
