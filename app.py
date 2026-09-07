@@ -553,7 +553,7 @@ def build_excel_data_only(out_df: pd.DataFrame) -> bytes:
 #   <folder app.py>/assets/logo_pelindo.png
 # ----------------------------------------------------------------
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-LOGO_CACA_ICON_PATH = ASSETS_DIR / "caca.png"
+LOGO_CACA_ICON_PATH = ASSETS_DIR / "logo_caca_icon.png"
 LOGO_PATH = ASSETS_DIR / "logo_pelindo.png"
 
 
@@ -564,21 +564,23 @@ def _img_to_base64(path: Path) -> str:
 
 def _render_header(icon_path: Path, brand_path: Path):
     """
-    Header custom pakai flexbox HTML (bukan st.columns) supaya ikon,
-    judul "CACA", subjudul, dan logo Pelindo di kanan bisa presisi
-    sejajar vertikal (align-items: center) mirip layout referensi.
+    Header custom pakai flexbox HTML (bukan st.columns). Layout:
+    baris atas = ikon CACA sejajar dengan teks "CACA" (align-items:
+    center), baris di bawahnya = kepanjangan "Cycle Analysis and
+    Cargo Optimalization" yang membentang di bawah ikon+teks (bukan
+    cuma di bawah teks CACA saja). Logo Pelindo tetap di kanan.
     """
     icon_ok = icon_path.exists()
     brand_ok = brand_path.exists()
 
     icon_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(icon_path)}" '
-        f'style="height:64px;width:auto;display:block;" />'
+        f'style="height:68px;width:auto;display:block;" />'
         if icon_ok else ""
     )
     brand_html = (
         f'<img src="data:image/png;base64,{_img_to_base64(brand_path)}" '
-        f'style="height:64px;width:auto;display:block;" />'
+        f'style="height:96px;width:auto;display:block;" />'
         if brand_ok else ""
     )
 
@@ -586,14 +588,14 @@ def _render_header(icon_path: Path, brand_path: Path):
         f"""
         <div style="display:flex;align-items:center;justify-content:space-between;
                     padding:6px 0 2px 0;">
-            <div style="display:flex;align-items:center;gap:12px;">
-                {icon_html}
-                <div style="line-height:1.15;">
-                    <div style="font-size:1.55rem;font-weight:800;color:#16324f;
-                                letter-spacing:0.5px;">CACA</div>
-                    <div style="font-size:0.72rem;color:#6b7280;">
-                        Cycle Analysis and Cargo Optimalization
-                    </div>
+            <div>
+                <div style="display:flex;align-items:center;gap:14px;">
+                    {icon_html}
+                    <div style="font-size:2.1rem;font-weight:800;color:#16324f;
+                                letter-spacing:0.5px;line-height:1;">CACA</div>
+                </div>
+                <div style="font-size:0.85rem;color:#6b7280;margin-top:4px;">
+                    Cycle Analysis and Cargo Optimalization
                 </div>
             </div>
             <div>{brand_html}</div>
