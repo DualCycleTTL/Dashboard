@@ -727,7 +727,7 @@ col_map = {
     "ts_h": cols[guess(cols, ["stack_unstack", "unstack_stack"])],
 }
 
-run = st.button("▶️ Jalankan Analisis Dual Cycle", type="primary")
+run = st.button("▶️ Jalankan Analisis", type="primary")
 
 # ----------------------------------------------------------------
 # Kalau ada hasil analisis lama tersimpan di session (dari sebelum
@@ -810,7 +810,7 @@ if (ambang_combo, ambang_dual, ambang_twinlift) != _ambang_terakhir:
     st.warning(
         "⚠️ Ambang batas di Pengaturan sudah diubah tapi belum diterapkan. "
         "Hasil di bawah masih pakai ambang yang lama — klik "
-        "\"▶️ Jalankan Analisis Dual Cycle\" lagi untuk memperbarui."
+        "\"▶️ Jalankan Analisis \" lagi untuk memperbarui."
     )
 
 st.success("Analisis selesai!")
